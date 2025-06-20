@@ -14,6 +14,15 @@
 #include "stepper.h" // stepper_event
 #include "trsync.h" // trsync_add_signal
 
+#define STEP_TOGGLE(s) do { \
+    if (!((s)->flags & SF_FPGA_CONTROL)) \
+        gpio_out_toggle_noirq((s)->step_pin); \
+} while (0)
+#define DIR_TOGGLE(s) do { \
+    if (!((s)->flags & SF_FPGA_CONTROL)) \
+        gpio_out_toggle_noirq((s)->dir_pin); \
+} while (0)
+
 DECL_CONSTANT("STEPPER_STEP_BOTH_EDGE", 1);
 
 #if CONFIG_INLINE_STEPPER_HACK && CONFIG_WANT_STEPPER_OPTIMIZED_BOTH_EDGE
@@ -55,7 +64,8 @@ enum { POSITION_BIAS=0x40000000 };
 
 enum {
     SF_LAST_DIR=1<<0, SF_NEXT_DIR=1<<1, SF_INVERT_STEP=1<<2, SF_NEED_RESET=1<<3,
-    SF_SINGLE_SCHED=1<<4, SF_OPTIMIZED_PATH=1<<5, SF_HAVE_ADD=1<<6
+    SF_SINGLE_SCHED=1<<4, SF_OPTIMIZED_PATH=1<<5, SF_HAVE_ADD=1<<6,
+    SF_FPGA_CONTROL=1<<7
 };
 
 // Setup a stepper for the next move in its queue
@@ -113,7 +123,7 @@ stepper_load_next(struct stepper *s)
             if (s->flags & SF_SINGLE_SCHED)
                 while (timer_is_before(timer_read_time(), min_next_time))
                     ;
-            gpio_out_toggle_noirq(s->dir_pin);
+            DIR_TOGGLE(s);
             uint32_t curtime = timer_read_time();
             min_next_time = curtime + s->step_pulse_ticks;
             if (timer_is_before(s->time.waketime, min_next_time))
@@ -124,7 +134,7 @@ stepper_load_next(struct stepper *s)
 
     // Set new direction (if needed)
     if (need_dir_change)
-        gpio_out_toggle_noirq(s->dir_pin);
+        DIR_TOGGLE(s);
     return SF_RESCHEDULE;
 }
 
@@ -139,7 +149,7 @@ static uint_fast8_t
 stepper_event_edge(struct timer *t)
 {
     struct stepper *s = container_of(t, struct stepper, time);
-    gpio_out_toggle_noirq(s->step_pin);
+    STEP_TOGGLE(s);
     uint32_t count = s->count - 1;
     if (likely(count)) {
         s->count = count;
@@ -160,18 +170,18 @@ static uint_fast8_t
 stepper_event_avr(struct timer *t)
 {
     struct stepper *s = container_of(t, struct stepper, time);
-    gpio_out_toggle_noirq(s->step_pin);
+    STEP_TOGGLE(s);
     uint16_t *pcount = (void*)&s->count, count = *pcount - 1;
     if (likely(count)) {
         *pcount = count;
         s->time.waketime += s->interval;
-        gpio_out_toggle_noirq(s->step_pin);
+        STEP_TOGGLE(s);
         if (s->flags & SF_HAVE_ADD)
             s->interval += s->add;
         return SF_RESCHEDULE;
     }
     uint_fast8_t ret = stepper_load_next(s);
-    gpio_out_toggle_noirq(s->step_pin);
+    STEP_TOGGLE(s);
     return ret;
 }
 
@@ -180,7 +190,7 @@ static uint_fast8_t
 stepper_event_full(struct timer *t)
 {
     struct stepper *s = container_of(t, struct stepper, time);
-    gpio_out_toggle_noirq(s->step_pin);
+    STEP_TOGGLE(s);
     uint32_t curtime = timer_read_time();
     uint32_t min_next_time = curtime + s->step_pulse_ticks;
     uint32_t count = s->count - 1;
@@ -253,6 +263,28 @@ stepper_oid_lookup(uint8_t oid)
 {
     return oid_lookup(oid, command_config_stepper);
 }
+
+// Enable or disable FPGA control for the given stepper
+void
+stepper_set_fpga(uint8_t oid, uint8_t enable)
+{
+    struct stepper *s = stepper_oid_lookup(oid);
+    irq_disable();
+    if (enable)
+        s->flags |= SF_FPGA_CONTROL;
+    else
+        s->flags &= ~SF_FPGA_CONTROL;
+    irq_enable();
+}
+
+// Command wrapper to configure FPGA control at runtime
+void
+command_stepper_set_fpga(uint32_t *args)
+{
+    stepper_set_fpga(args[0], args[1]);
+}
+DECL_COMMAND(command_stepper_set_fpga,
+             "stepper_set_fpga oid=%c enable=%c");
 
 // Schedule a set of steps with a given timing
 void
@@ -356,11 +388,13 @@ stepper_stop(struct trsync_signal *tss, uint8_t reason)
     s->count = 0;
     s->flags = ((s->flags & (SF_INVERT_STEP|SF_SINGLE_SCHED|SF_OPTIMIZED_PATH))
                 | SF_NEED_RESET);
-    gpio_out_write(s->dir_pin, 0);
-    if (!(s->flags & SF_SINGLE_SCHED)
-        || (HAVE_AVR_OPTIMIZATION && s->flags & SF_OPTIMIZED_PATH))
-        // Must return step pin to "unstep" state
-        gpio_out_write(s->step_pin, s->flags & SF_INVERT_STEP);
+    if (!(s->flags & SF_FPGA_CONTROL)) {
+        gpio_out_write(s->dir_pin, 0);
+        if (!(s->flags & SF_SINGLE_SCHED)
+            || (HAVE_AVR_OPTIMIZATION && s->flags & SF_OPTIMIZED_PATH))
+            // Must return step pin to "unstep" state
+            gpio_out_write(s->step_pin, s->flags & SF_INVERT_STEP);
+    }
     while (!move_queue_empty(&s->mq)) {
         struct move_node *mn = move_queue_pop(&s->mq);
         struct stepper_move *m = container_of(mn, struct stepper_move, node);

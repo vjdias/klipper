@@ -256,6 +256,7 @@ config WANT_LDC1612
 config WANT_SENSOR_ANGLE
     bool "Support angle sensors"
     depends on WANT_SPI
+
 endmenu
 
 # Generic configuration options for CANbus
