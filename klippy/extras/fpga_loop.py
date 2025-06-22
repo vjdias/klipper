@@ -135,6 +135,9 @@ class FPGALoopController:
         self._queue_pwm = self._mcu.lookup_command(
             "queue_fpga_pwm oid=%c clock=%u duty=%hu",
             cq=self.cmd_queue)
+        curtime = self.reactor.monotonic()
+        printtime = self._mcu.estimated_print_time(curtime)
+        self._last_clock = self._mcu.print_time_to_clock(printtime + 0.200)
         logging.info("FPGA Loop '%s': fila PWM inicializada", self.name)
 
     def _stepgen_fpga(self, flush_time):
