@@ -63,6 +63,7 @@ class FPGALoopController:
         self._axes = {}
         self.cmd_queue = None
         self._queue_pwm = None
+        self._set_fpga_cmd = None
         self._last_clock = 0
 
         # Rotina de inicialização após conexão com o MCU
@@ -80,6 +81,10 @@ class FPGALoopController:
             # Desativa o gerador de passos normal (queue_step) para este eixo.
             # Os pulsos serão emitidos exclusivamente pelo FPGA.
             toolhead.unregister_step_generator(stepper.generate_steps)
+            if self._set_fpga_cmd is None:
+                self._set_fpga_cmd = self._mcu.lookup_command(
+                    "stepper_set_fpga oid=%c enable=%c")
+            self._set_fpga_cmd.send([stepper.get_oid(), 1])
         # Passa a utilizar o gerador de passos deste módulo, que repassa
         # comandos ao FPGA em vez de programar pulsos no MCU.
         toolhead.register_step_generator(self._stepgen_fpga)
@@ -120,9 +125,6 @@ class FPGALoopController:
             logging.info(
                 "FPGA Loop '%s' usando SPI por software: MOSI=%s MISO=%s SCLK=%s",
                 self.name, self.sw_mosi_pin, self.sw_miso_pin, self.sw_sclk_pin)
-        for stepper, _ in self._axes.values():
-            self._mcu.add_config_cmd(
-                f"stepper_set_fpga oid={stepper.get_oid()} enable=1")
         logging.info("FPGA Loop '%s' configurado: %s", self.name, cmd)
 
     def _init_pwm(self):
