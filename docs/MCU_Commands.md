@@ -245,6 +245,10 @@ only of interest to developers looking to gain insight into Klipper.
   the clock so that the next step is relative to the supplied 'clock'
   time. The host usually only sends this command at the start of a
   print.
+* `stepper_set_fpga oid=%c enable=%c` : When `enable` is 1 the MCU will
+  suppress step and direction pin updates for the given stepper so that
+  an external controller can drive it. Setting `enable` to 0 reverts to
+  normal MCU driven stepping.
 
 * `stepper_get_position oid=%c` : This command causes the
   micro-controller to generate a "stepper_position" response message
@@ -291,3 +295,23 @@ scheduling new queue_step commands accordingly.
 * `spi_send oid=%c data=%*s` : This command is similar to
   "spi_transfer", but it does not generate a "spi_transfer_response"
   message.
+
+### FPGA closed-loop controller
+
+* `config_fpga oid=%c spi_oid=%c axis_x_oid=%c microsteps_x=%hu`
+  `axis_y_oid=%c microsteps_y=%hu axis_z_oid=%c microsteps_z=%hu`
+  `axis_a_oid=%c microsteps_a=%hu axis_b_oid=%c microsteps_b=%hu`
+  `pid_P=%hu pid_I=%hu pid_D=%hu` : Configure an FPGA used for motor
+  control. The host provides the stepper OIDs for each axis along with
+  microstep settings and PID gains. If an axis is not used, specify the
+  OID as zero and the microstep value as zero. Each PID value is expected
+  as a 16-bit integer representing a fraction of 1.0 (for example, a
+  value of 6553 corresponds to `0.1`). The MCU forwards this
+  configuration via SPI to the attached FPGA.
+
+* `queue_fpga_move oid=%c clock=%u interval=%u count=%hu add=%hi` :
+  Schedule a movement for an FPGA controlled axis. The parameters mirror
+  the `queue_step` command. The MCU forwards the message via SPI at the
+  given clock time and tracks completion using an internal buffer.
+* `query_fpga_buffer oid=%c` : The MCU responds with `fpga_buffer` and the
+  number of free slots available in the FPGA move buffer.
