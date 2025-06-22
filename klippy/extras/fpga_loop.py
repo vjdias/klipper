@@ -49,22 +49,26 @@ class FPGALoopController:
                                                above=0.)
         self.invert_enable = config.getboolean('invert_enable', False)
 
-        # Variáveis inicializadas após evento 'klippy:connect'
-        self._mcu = None
-        self.oid = None
+        # MCU já está disponível nesta fase, pois é criado antes das seções
+        # extras. Registramos o callback de configuração imediatamente para que
+        # os comandos sejam incluídos na configuração inicial enviada ao MCU.
+        self._mcu = self.printer.lookup_object('mcu')
+        self.oid = self._mcu.create_oid()
+        self._mcu.register_config_callback(self._build_config)
+
+        # Variáveis usadas em tempo de execução
         self._axes = {}
         self.cmd_queue = None
         self._queue_pwm = None
         self._last_clock = 0
 
-        # Adia conexões até que todos os módulos estejam instanciados
+        # Rotina de inicialização após conexão com o MCU
         self.printer.register_event_handler('klippy:connect',
                                             self._handle_connect)
 
     def _handle_connect(self):
-        # Obter referências a MCU e steppers somente após todos existirem
-        self._mcu = self.printer.lookup_object('mcu')
-        self.oid = self._mcu.create_oid()
+        # Todas as impressoras já estão instanciadas neste ponto; podemos
+        # localizar os steppers para cada eixo e substituir o gerador de passos
         force_move = self.printer.lookup_object('force_move')
         toolhead = self.printer.lookup_object('toolhead')
         for axis, (sname, microsteps) in self._axis_defs.items():
@@ -76,11 +80,17 @@ class FPGALoopController:
         # Passa a utilizar o gerador de passos deste módulo, que repassa
         # comandos ao FPGA em vez de programar pulsos no MCU.
         toolhead.register_step_generator(self._stepgen_fpga)
-
-        self._mcu.register_config_callback(self._build_config)
         self._init_pwm()
 
     def _build_config(self):
+        # Durante a montagem da configuração podemos finalmente resolver os
+        # steppers correspondentes, caso ainda não o tenhamos feito.
+        if not self._axes:
+            force_move = self.printer.lookup_object('force_move')
+            for axis, (sname, microsteps) in self._axis_defs.items():
+                stepper = force_move.lookup_stepper(sname)
+                self._axes[axis] = (stepper, microsteps)
+
         parts = [
             f"config_fpga oid={self.oid}",
             f"spi_oid={self.spi.get_oid()}"
