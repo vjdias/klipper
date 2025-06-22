@@ -98,9 +98,14 @@ class FPGALoopController:
         for axis, (stepper, microsteps) in self._axes.items():
             parts.append(f"axis_{axis}_oid={stepper.get_oid()}")
             parts.append(f"microsteps_{axis}={microsteps}")
-        parts.append(f"pid_P={self.pid_P}")
-        parts.append(f"pid_I={self.pid_I}")
-        parts.append(f"pid_D={self.pid_D}")
+        # Os ganhos PID são configurados como inteiros 16 bits no MCU.
+        pid_scale = int(self._mcu.get_constant_float('FPGA_PWM_MAX'))
+        p_gain = int(self.pid_P * pid_scale + 0.5)
+        i_gain = int(self.pid_I * pid_scale + 0.5)
+        d_gain = int(self.pid_D * pid_scale + 0.5)
+        parts.append(f"pid_P={p_gain}")
+        parts.append(f"pid_I={i_gain}")
+        parts.append(f"pid_D={d_gain}")
         cmd = ' '.join(parts)
         self._mcu.add_config_cmd(cmd)
         if self.sw_mosi_pin or self.sw_miso_pin or self.sw_sclk_pin:

@@ -5503,7 +5503,9 @@ axis_b:
 #pid_P: 0.100
 #pid_I: 0.010
 #pid_D: 0.001
-#   PID constants used by the FPGA controller.  The defaults are 0.
+#   PID constants used by the FPGA controller.  Specify each value as a
+#   floating point number between 0.0 and 1.0; it will be scaled to a
+#   16-bit integer before being sent to the MCU.  The defaults are 0.
 #update_interval: 0.005
 #   Time between updates to the FPGA PWM generator.  The default is
 #   0.005 seconds.
