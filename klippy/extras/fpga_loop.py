@@ -144,20 +144,25 @@ class FPGALoopController:
     def _stepgen_fpga(self, flush_time):
         """Gerador de passos substituto que envia atualizacoes de PWM."""
         try:
-            self.set_pwm(flush_time, 0.)
+            self.set_pwm(0.)
         except self.printer.command_error as e:
             logging.error("FPGA stepgen erro: %s", str(e))
         return
 
-    def set_pwm(self, print_time, duty):
+    def set_pwm(self, duty, at_time=None):
         if self._queue_pwm is None:
             raise self.printer.command_error("FPGA loop não inicializado")
-        clock = self._mcu.print_time_to_clock(print_time)
-        clock = max(self._last_clock, clock)
+        if at_time is None:
+            at_time = self._mcu.clock_to_print_time(self._last_clock)
+            at_time += self.update_interval
+        clock = self._mcu.print_time_to_clock(at_time)
+        min_clock = self._last_clock
+        if clock < min_clock + self._mcu.print_time_to_clock(0.010):
+            clock = min_clock + self._mcu.print_time_to_clock(0.010)
         duty = max(0.0, min(1.0, duty))
         ivalue = int(duty * self._pwm_max + 0.5)
         self._queue_pwm.send([self.oid, clock, ivalue],
-                             minclock=self._last_clock, reqclock=clock)
+                             minclock=min_clock, reqclock=clock)
         self._last_clock = clock
         logging.debug("FPGA Loop '%s': duty=%.3f enviado em clock=%d",
                       self.name, duty, clock)
