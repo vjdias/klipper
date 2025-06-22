@@ -17,8 +17,16 @@ class FPGALoopController:
         self.reactor = self.printer.get_reactor()
         self.name = config.get_name().split()[-1]
 
-        # Configura objeto SPI utilizando o helper padronizado
-        # (permite que o MCU trate detalhes do barramento)
+        # Opções para uso de SPI via bitbang (software) quando a MCU não
+        # possui um barramento SPI livre.  Caso qualquer um dos pinos seja
+        # especificado, o helper abaixo automaticamente os utiliza.
+        self.sw_mosi_pin = config.get('spi_software_mosi_pin', None)
+        self.sw_miso_pin = config.get('spi_software_miso_pin', None)
+        self.sw_sclk_pin = config.get('spi_software_sclk_pin', None)
+
+        # Configura objeto SPI utilizando o helper padronizado. Este helper
+        # entende as opções "spi_bus" e "spi_software_*_pin" e gera os
+        # comandos apropriados para o MCU.
         self.spi = bus.MCU_SPI_from_config(
             config, 0, pin_option='spi_cs_pin', default_speed=1000000)
 
@@ -85,6 +93,10 @@ class FPGALoopController:
         parts.append(f"pid_D={self.pid_D}")
         cmd = ' '.join(parts)
         self._mcu.add_config_cmd(cmd)
+        if self.sw_mosi_pin or self.sw_miso_pin or self.sw_sclk_pin:
+            logging.info(
+                "FPGA Loop '%s' usando SPI por software: MOSI=%s MISO=%s SCLK=%s",
+                self.name, self.sw_mosi_pin, self.sw_miso_pin, self.sw_sclk_pin)
         for stepper, _ in self._axes.values():
             self._mcu.add_config_cmd(
                 f"stepper_set_fpga oid={stepper.get_oid()} enable=1")
