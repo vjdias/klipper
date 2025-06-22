@@ -95,8 +95,13 @@ class FPGALoopController:
             f"config_fpga oid={self.oid}",
             f"spi_oid={self.spi.get_oid()}"
         ]
-        for axis, (stepper, microsteps) in self._axes.items():
-            parts.append(f"axis_{axis}_oid={stepper.get_oid()}")
+        # O firmware espera parametros para todos os cinco eixos. Caso algum
+        # nao tenha sido definido no arquivo de configuracao, utiliza-se o
+        # valor zero para indicar que ele esta desativado.
+        for axis in ['x', 'y', 'z', 'a', 'b']:
+            stepper, microsteps = self._axes.get(axis, (None, 0))
+            oid = stepper.get_oid() if stepper else 0
+            parts.append(f"axis_{axis}_oid={oid}")
             parts.append(f"microsteps_{axis}={microsteps}")
         # Os ganhos PID são configurados como inteiros 16 bits no MCU.
         pid_scale = int(self._mcu.get_constant_float('FPGA_PWM_MAX'))

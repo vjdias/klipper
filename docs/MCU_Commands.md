@@ -303,10 +303,11 @@ scheduling new queue_step commands accordingly.
   `axis_a_oid=%c microsteps_a=%hu axis_b_oid=%c microsteps_b=%hu`
   `pid_P=%hu pid_I=%hu pid_D=%hu` : Configure an FPGA used for motor
   control. The host provides the stepper OIDs for each axis along with
-  microstep settings and PID gains. Each PID value is expected as a
-  16-bit integer representing a fraction of 1.0 (for example, a value of
-  6553 corresponds to `0.1`). The MCU forwards this configuration via
-  SPI to the attached FPGA.
+  microstep settings and PID gains. If an axis is not used, specify the
+  OID as zero and the microstep value as zero. Each PID value is expected
+  as a 16-bit integer representing a fraction of 1.0 (for example, a
+  value of 6553 corresponds to `0.1`). The MCU forwards this
+  configuration via SPI to the attached FPGA.
 
 * `queue_fpga_pwm oid=%c clock=%u duty=%hu` : Schedule an update to the
   FPGA PWM generator. `duty` is an integer between 0 and the
