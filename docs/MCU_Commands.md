@@ -309,7 +309,9 @@ scheduling new queue_step commands accordingly.
   value of 6553 corresponds to `0.1`). The MCU forwards this
   configuration via SPI to the attached FPGA.
 
-* `queue_fpga_pwm oid=%c clock=%u duty=%hu` : Schedule an update to the
-  FPGA PWM generator. `duty` is an integer between 0 and the
-  `FPGA_PWM_MAX` constant. The MCU will transmit the command at the
-  specified clock time.
+* `queue_fpga_move oid=%c clock=%u interval=%u count=%hu add=%hi` :
+  Schedule a movement for an FPGA controlled axis. The parameters mirror
+  the `queue_step` command. The MCU forwards the message via SPI at the
+  given clock time and tracks completion using an internal buffer.
+* `query_fpga_buffer oid=%c` : The MCU responds with `fpga_buffer` and the
+  number of free slots available in the FPGA move buffer.

@@ -5509,8 +5509,8 @@ axis_b:
 #   floating point number between 0.0 and 1.0; it will be scaled to a
 #   16-bit integer before being sent to the MCU.  The defaults are 0.
 #update_interval: 0.005
-#   Time between updates to the FPGA PWM generator.  The default is
-#   0.005 seconds.
+#   Time between move updates sent to the FPGA.  The default is 0.005
+#   seconds.
 #invert_enable: False
 #   Invert the enable pin logic if necessary.
 ```

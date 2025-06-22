@@ -62,7 +62,7 @@ class FPGALoopController:
         # Variáveis usadas em tempo de execução
         self._axes = {}
         self.cmd_queue = None
-        self._queue_pwm = None
+        self._queue_move = None
         self._set_fpga_cmd = None
         self._last_clock = 0
 
@@ -129,12 +129,16 @@ class FPGALoopController:
 
     def _init_pwm(self):
         self.cmd_queue = self._mcu.alloc_command_queue()
-        # O firmware define o valor maximo de PWM atraves da constante
-        # FPGA_PWM_MAX. Obtemos esse valor para converter o duty (0.0-1.0)
         self._pwm_max = self._mcu.get_constant_float('FPGA_PWM_MAX')
-        self._queue_pwm = self._mcu.lookup_command(
-            "queue_fpga_pwm oid=%c clock=%u duty=%hu",
+        self.buffer_size = int(self._mcu.get_constant('FPGA_BUFFER_SIZE'))
+        self._queue_move = self._mcu.lookup_command(
+            "queue_fpga_move oid=%c clock=%u interval=%u count=%hu add=%hi",
             cq=self.cmd_queue)
+        self._query_buffer = self._mcu.lookup_query_command(
+            "query_fpga_buffer oid=%c",
+            "fpga_buffer oid=%c free=%c")
+        resp = self._query_buffer.send([self.oid])
+        self._buffer_free = resp.get('free', self.buffer_size)
         curtime = self.reactor.monotonic()
         curclock = self._mcu.print_time_to_clock(
             self._mcu.estimated_print_time(curtime))
@@ -144,13 +148,13 @@ class FPGALoopController:
     def _stepgen_fpga(self, flush_time):
         """Gerador de passos substituto que envia atualizacoes de PWM."""
         try:
-            self.set_pwm(0.)
+            self.set_move(0, 0, 0.)
         except self.printer.command_error as e:
             logging.error("FPGA stepgen erro: %s", str(e))
         return
 
-    def set_pwm(self, duty, at_time=None):
-        if self._queue_pwm is None:
+    def set_move(self, interval, count, at_time=None, add=0):
+        if self._queue_move is None:
             raise self.printer.command_error("FPGA loop não inicializado")
         if at_time is None:
             at_time = self._mcu.clock_to_print_time(self._last_clock)
@@ -159,13 +163,16 @@ class FPGALoopController:
         min_clock = self._last_clock
         if clock < min_clock + self._mcu.print_time_to_clock(0.010):
             clock = min_clock + self._mcu.print_time_to_clock(0.010)
-        duty = max(0.0, min(1.0, duty))
-        ivalue = int(duty * self._pwm_max + 0.5)
-        self._queue_pwm.send([self.oid, clock, ivalue],
-                             minclock=min_clock, reqclock=clock)
+        # Garante espaço no buffer do FPGA consultando a MCU
+        while self._buffer_free == 0:
+            resp = self._query_buffer.send([self.oid])
+            self._buffer_free = resp.get('free', 0)
+            if self._buffer_free == 0:
+                self.reactor.pause(0.001)
+        self._queue_move.send([self.oid, clock, interval, count, add],
+                              minclock=min_clock, reqclock=clock)
+        self._buffer_free -= 1
         self._last_clock = clock
-        logging.debug("FPGA Loop '%s': duty=%.3f enviado em clock=%d",
-                      self.name, duty, clock)
 
 
 def load_config_prefix(config):

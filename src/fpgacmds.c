@@ -13,46 +13,58 @@
 #include "spicmds.h"            // spidev_transfer
 #include "stepper.h"             // stepper_set_fpga
 
-// Valor maximo que representa duty cycle em queue_fpga_pwm
+// Valor maximo que representa duty cycle em queue_fpga_move
 #define FPGA_PWM_MAX 65535
 DECL_CONSTANT("FPGA_PWM_MAX", FPGA_PWM_MAX);
 
-// Estrutura para cada atualizacao de duty enviado ao FPGA
-struct fpga_pwm_move {
+// Tamanho maximo do buffer interno de movimentos
+#define FPGA_BUFFER_SIZE 64
+DECL_CONSTANT("FPGA_BUFFER_SIZE", FPGA_BUFFER_SIZE);
+
+// Estrutura para cada movimento enfileirado ao FPGA
+struct fpga_move {
     struct move_node node;
-    uint32_t waketime; // momento para envio no clock MCU
-    uint16_t duty;     // valor de duty (0..FPGA_PWM_MAX)
+    uint32_t waketime; // instante para envio
+    uint32_t interval; // intervalo base entre passos
+    uint16_t count;    // quantidade de passos
+    int16_t add;       // incremento por passo
 };
 
 // Estrutura principal associada a um controlador FPGA
 struct fpga_controller {
     struct timer timer;            // gerencia execucao dos comandos enfileirados
     struct spidev_s *spi;         // interface SPI utilizada
-    struct move_queue_head mq;    // fila de atualizacoes PWM
+    struct move_queue_head mq;    // fila de movimentos
+    uint8_t queued;               // numero de movimentos aguardando
 };
 
 /********************************************************************
  * Rotina de envio ao FPGA
  ********************************************************************/
 
-// Envia o proximo comando PWM ao FPGA quando chega o tempo indicado
+// Envia o proximo movimento ao FPGA quando chega o tempo indicado
 static uint_fast8_t
-fpga_pwm_event(struct timer *t)
+fpga_move_event(struct timer *t)
 {
     struct fpga_controller *fc = container_of(t, struct fpga_controller, timer);
     struct move_node *mn = move_queue_pop(&fc->mq);
-    struct fpga_pwm_move *m = container_of(mn, struct fpga_pwm_move, node);
+    struct fpga_move *m = container_of(mn, struct fpga_move, node);
 
-    // Monta mensagem simples: cmd=1, duty em formato little-endian
-    uint8_t msg[3] = { 1, m->duty & 0xff, m->duty >> 8 };
+    // Mensagem: cmd=1, intervalo, count, add (little-endian)
+    uint8_t msg[9] = { 1,
+        m->interval, m->interval>>8, m->interval>>16, m->interval>>24,
+        m->count & 0xff, m->count>>8,
+        m->add & 0xff, m->add >> 8 };
     spidev_transfer(fc->spi, 0, sizeof(msg), msg);
     move_free(m);
+    if (fc->queued)
+        fc->queued--;
 
     if (move_queue_empty(&fc->mq))
         return SF_DONE;
 
-    struct fpga_pwm_move *next = container_of(move_queue_first(&fc->mq),
-                                              struct fpga_pwm_move, node);
+    struct fpga_move *next = container_of(move_queue_first(&fc->mq),
+                                          struct fpga_move, node);
     t->waketime = next->waketime;
     return SF_RESCHEDULE;
 }
@@ -67,9 +79,10 @@ command_config_fpga(uint32_t *args)
 {
     struct fpga_controller *fc = oid_alloc(args[0], command_config_fpga,
                                            sizeof(*fc));
-    fc->timer.func = fpga_pwm_event;
+    fc->timer.func = fpga_move_event;
     fc->spi = spidev_oid_lookup(args[1]);
-    move_queue_setup(&fc->mq, sizeof(struct fpga_pwm_move));
+    move_queue_setup(&fc->mq, sizeof(struct fpga_move));
+    fc->queued = 0;
 
     // Transmite configuracao estatica ao FPGA. O formato exato da
     // mensagem eh definido pela implementacao do hardware e pode
@@ -86,17 +99,22 @@ DECL_COMMAND(command_config_fpga,
              " axis_b_oid=%c microsteps_b=%hu"
              " pid_P=%hu pid_I=%hu pid_D=%hu");
 
-// Enfileira nova atualizacao de duty para o FPGA
+// Enfileira novo movimento para o FPGA
 void
-command_queue_fpga_pwm(uint32_t *args)
+command_queue_fpga_move(uint32_t *args)
 {
     struct fpga_controller *fc = oid_lookup(args[0], command_config_fpga);
-    struct fpga_pwm_move *m = move_alloc();
+    if (fc->queued >= FPGA_BUFFER_SIZE)
+        shutdown("FPGA buffer full");
+    struct fpga_move *m = move_alloc();
     m->waketime = args[1];
-    m->duty = args[2];
+    m->interval = args[2];
+    m->count = args[3];
+    m->add = args[4];
 
     irq_disable();
     int need_add = move_queue_push(&m->node, &fc->mq);
+    fc->queued++;
     irq_enable();
     if (!need_add)
         return;
@@ -105,8 +123,18 @@ command_queue_fpga_pwm(uint32_t *args)
     fc->timer.waketime = m->waketime;
     sched_add_timer(&fc->timer);
 }
-DECL_COMMAND(command_queue_fpga_pwm,
-             "queue_fpga_pwm oid=%c clock=%u duty=%hu");
+DECL_COMMAND(command_queue_fpga_move,
+             "queue_fpga_move oid=%c clock=%u interval=%u count=%hu add=%hi");
+
+// Retorna quantidade de espacos livres no buffer do FPGA
+void
+command_query_fpga_buffer(uint32_t *args)
+{
+    struct fpga_controller *fc = oid_lookup(args[0], command_config_fpga);
+    uint8_t free = FPGA_BUFFER_SIZE - fc->queued;
+    sendf("fpga_buffer oid=%c free=%c", args[0], free);
+}
+DECL_COMMAND(command_query_fpga_buffer, "query_fpga_buffer oid=%c");
 
 // Limpa filas e pinos durante desligamento
 void
