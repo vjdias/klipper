@@ -5500,7 +5500,8 @@ axis_a:
 axis_b:
 #   Names of the stepper sections for each controlled axis.  Omit an
 #   axis to disable it; the host will then send a zero OID and zero
-#   microstep value for that axis.
+#   microstep value for that axis. Pelo menos um eixo deve ser
+#   configurado.
 #pid_P: 0.100
 #pid_I: 0.010
 #pid_D: 0.001

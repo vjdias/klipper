@@ -39,6 +39,9 @@ class FPGALoopController:
             scfg = config.getsection(sec_name)
             microsteps = scfg.getint('microsteps', note_valid=False)
             self._axis_defs[axis] = (sec_name, microsteps)
+        if not self._axis_defs:
+            raise self.printer.config_error(
+                "[fpga_loop] requer pelo menos um eixo configurado")
 
         # Ganhos PID configurados para o controlador
         self.pid_P = config.getfloat('pid_P', minval=0.0)
