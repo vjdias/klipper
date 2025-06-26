@@ -5475,42 +5475,6 @@ cs_pin:
 #   above parameters.
 ```
 
-### [fpga_loop]
-
-Closed loop motion control handled by an external FPGA.  The FPGA
-communicates with the MCU via SPI and provides step generation and
-feedback for the configured axes.
-
-```
-[fpga_loop myloop]
-spi_cs_pin:
-#   Chip select pin for the FPGA.  This parameter must be provided.
-#spi_speed: 1000000
-#spi_bus:
-#spi_software_sclk_pin:
-#spi_software_mosi_pin:
-#spi_software_miso_pin:
-#   See the "common SPI settings" section for a description of the above
-#   parameters.  On micro-controllers without available hardware SPI,
-#   specify the spi_software_* pins.
-axis_x:
-axis_y:
-axis_z:
-axis_a:
-axis_b:
-#   Names of the stepper sections for each controlled axis.  Omit an
-#   axis to disable it.
-#pid_P: 0.100
-#pid_I: 0.010
-#pid_D: 0.001
-#   PID constants used by the FPGA controller.  The defaults are 0.
-#update_interval: 0.005
-#   Time between updates to the FPGA PWM generator.  The default is
-#   0.005 seconds.
-#invert_enable: False
-#   Invert the enable pin logic if necessary.
-```
-
 ## Common bus parameters
 
 ### Common SPI settings

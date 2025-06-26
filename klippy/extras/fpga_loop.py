@@ -1,126 +1,227 @@
++156
+-58
+
 # Controle de movimento em malha fechada via FPGA conectado ao MCU.
 # Este módulo permite configurar parâmetros estáticos do controlador FPGA
-# e enviar comandos PWM em tempo real utilizando a fila de comandos do MCU.
+# e enviar comandos de movimento em tempo real utilizando a fila do MCU.
 #
 # Copyright (C) 2025  Your Name <you@domain.com>
-# This file may be distributed under the terms of the GNU GPLv3 license.
+# Este arquivo pode ser distribuído sob os termos da licença GNU GPLv3.
 
 import logging
 from . import bus
 
 
 class FPGALoopController:
-    """Controlador de malha fechada baseado em FPGA."""
+    """Controlador de malha fechada implementado em FPGA."""
 
     def __init__(self, config):
+        # Objetos principais do Klipper
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
         self.name = config.get_name().split()[-1]
 
-        # Configura objeto SPI utilizando o helper padronizado
-        # (permite que o MCU trate detalhes do barramento)
+        # Opções para uso de SPI via bitbang caso o MCU não possua barramento
+        # dedicado. Se algum dos pinos for especificado, o helper tratará o
+        # acesso em software automaticamente.
+        self.sw_mosi_pin = config.get('spi_software_mosi_pin', None)
+        self.sw_miso_pin = config.get('spi_software_miso_pin', None)
+        self.sw_sclk_pin = config.get('spi_software_sclk_pin', None)
+
+        # Cria objeto SPI utilizando helper padronizado do Klipper
         self.spi = bus.MCU_SPI_from_config(
             config, 0, pin_option='spi_cs_pin', default_speed=1000000)
 
-        # Definição de eixos associados a steppers
+        # Pino usado como "trigger" indicando que o FPGA terminou um movimento
+        ppins = self.printer.lookup_object('pins')
+        tpin_params = ppins.lookup_pin(config.get('trigger_pin'))
+        if tpin_params['chip'] != self.spi.get_mcu():
+            raise config.error('trigger_pin deve estar no mesmo MCU do SPI')
+        self.trigger_pin = tpin_params['pin']
+
+        # Definição dos eixos associados a steppers
         self._axis_defs = {}
         for axis in ['x', 'y', 'z', 'a', 'b']:
             sec_name = config.get(f'axis_{axis}', None)
             if sec_name is None:
                 continue
             scfg = config.getsection(sec_name)
-            microsteps = scfg.getint('microsteps', note_valid=False)
-            self._axis_defs[axis] = (sec_name, microsteps)
+            micro = scfg.getint('microsteps', note_valid=False)
+            self._axis_defs[axis] = (sec_name, micro)
+        if not self._axis_defs:
+            raise self.printer.config_error(
+                "[fpga_loop] requer pelo menos um eixo configurado")
 
-        # Ganhos PID configurados para o controlador
-        self.pid_P = config.getfloat('pid_P', minval=0.0)
-        self.pid_I = config.getfloat('pid_I', minval=0.0)
-        self.pid_D = config.getfloat('pid_D', minval=0.0)
+        # Ganhos PID individuais para cada eixo
+        self.pid_gains = {}
+        for axis in ['x', 'y', 'z', 'a', 'b']:
+            p = config.getfloat(f'pid_P_{axis}', None)
+            i = config.getfloat(f'pid_I_{axis}', None)
+            d = config.getfloat(f'pid_D_{axis}', None)
+            if p is not None and i is not None and d is not None:
+                self.pid_gains[axis] = (p, i, d)
+        # Caso algum eixo não possua ganho definido, assume zero
+        for axis in self._axis_defs:
+            self.pid_gains.setdefault(axis, (0.0, 0.0, 0.0))
 
         self.update_interval = config.getfloat('update_interval', 0.005,
                                                above=0.)
         self.invert_enable = config.getboolean('invert_enable', False)
 
-        # Variáveis inicializadas após evento 'klippy:connect'
-        self._mcu = None
-        self.oid = None
+        # Variáveis para uso após a conexão
+        self._mcu = self.printer.lookup_object('mcu')
+        self.oid = self._mcu.create_oid()
+        # registra comando de configuração imediatamente para que
+        # o MCU crie o controlador antes do restante da conexão
+        self._mcu.register_config_callback(self._build_config)
+
         self._axes = {}
         self.cmd_queue = None
-        self._queue_pwm = None
+        self._queue_move = None
+        self._queue_pmove = None
+        self._query_buffer = None
+        self._set_fpga_cmd = None
+        self._buffer_free = 0
+        self.buffer_size = 0
+        self._pwm_max = 0
         self._last_clock = 0
 
-        # Adia conexões até que todos os módulos estejam instanciados
+        # Processa conexão quando MCU estiver pronta
         self.printer.register_event_handler('klippy:connect',
                                             self._handle_connect)
 
     def _handle_connect(self):
-        # Obter referências a MCU e steppers somente após todos existirem
-        self._mcu = self.printer.lookup_object('mcu')
-        self.oid = self._mcu.create_oid()
+        """Configura steppers e inicializa comunicação."""
         force_move = self.printer.lookup_object('force_move')
         toolhead = self.printer.lookup_object('toolhead')
-        for axis, (sname, microsteps) in self._axis_defs.items():
-            stepper = force_move.lookup_stepper(sname)
-            self._axes[axis] = (stepper, microsteps)
-            # Desativa o gerador de passos normal (queue_step) para este eixo.
-            # Os pulsos serão emitidos exclusivamente pelo FPGA.
+        for axis, (sec_name, micro) in self._axis_defs.items():
+            stepper = force_move.lookup_stepper(sec_name)
+            self._axes[axis] = (stepper, micro)
+            # Desativa gerador de passos tradicional deste eixo
             toolhead.unregister_step_generator(stepper.generate_steps)
-        # Passa a utilizar o gerador de passos deste módulo, que repassa
-        # comandos ao FPGA em vez de programar pulsos no MCU.
+            if self._set_fpga_cmd is None:
+                self._set_fpga_cmd = self._mcu.lookup_command(
+                    "stepper_set_fpga oid=%c enable=%c")
+            self._set_fpga_cmd.send([stepper.get_oid(), 1])
         toolhead.register_step_generator(self._stepgen_fpga)
-
         self._mcu.register_config_callback(self._build_config)
-        self._init_pwm()
+        self._init_comm()
 
     def _build_config(self):
+        """Envia configuração estática ao MCU/FPGA."""
         parts = [
             f"config_fpga oid={self.oid}",
-            f"spi_oid={self.spi.get_oid()}"
+            f"spi_oid={self.spi.get_oid()}",
+            f"trigger_pin={self.trigger_pin}"
         ]
-        for axis, (stepper, microsteps) in self._axes.items():
-            parts.append(f"axis_{axis}_oid={stepper.get_oid()}")
-            parts.append(f"microsteps_{axis}={microsteps}")
-        parts.append(f"pid_P={self.pid_P}")
-        parts.append(f"pid_I={self.pid_I}")
-        parts.append(f"pid_D={self.pid_D}")
+        if not self._pwm_max:
+            try:
+                self._pwm_max = self._mcu.get_constant_float('FPGA_PWM_MAX')
+            except Exception:
+                self._pwm_max = 65535.
+        for axis in ['x', 'y', 'z', 'a', 'b']:
+            stepper, micro = self._axes.get(axis, (None, 0))
+            oid = stepper.get_oid() if stepper else 0
+            p, i, d = self.pid_gains.get(axis, (0.0, 0.0, 0.0))
+            parts.append(f"axis_{axis}_oid={oid}")
+            parts.append(f"microsteps_{axis}={micro}")
+            parts.append(f"pid_P_{axis}={int(p*self._pwm_max+0.5)}")
+            parts.append(f"pid_I_{axis}={int(i*self._pwm_max+0.5)}")
+            parts.append(f"pid_D_{axis}={int(d*self._pwm_max+0.5)}")
         cmd = ' '.join(parts)
         self._mcu.add_config_cmd(cmd)
-        for stepper, _ in self._axes.values():
-            self._mcu.add_config_cmd(
-                f"stepper_set_fpga oid={stepper.get_oid()} enable=1")
         logging.info("FPGA Loop '%s' configurado: %s", self.name, cmd)
 
-    def _init_pwm(self):
+    def _init_comm(self):
+        """Inicializa fila de comandos e estado do buffer."""
         self.cmd_queue = self._mcu.alloc_command_queue()
-        # O firmware define o valor maximo de PWM atraves da constante
-        # FPGA_PWM_MAX. Obtemos esse valor para converter o duty (0.0-1.0)
         self._pwm_max = self._mcu.get_constant_float('FPGA_PWM_MAX')
-        self._queue_pwm = self._mcu.lookup_command(
-            "queue_fpga_pwm oid=%c clock=%u duty=%hu",
+        self.buffer_size = int(self._mcu.get_constants().get(
+            'FPGA_BUFFER_SIZE', 0))
+        self._queue_move = self._mcu.lookup_command(
+            "queue_fpga_move oid=%c clock=%u interval=%u count=%hu add=%hi",
             cq=self.cmd_queue)
-        logging.info("FPGA Loop '%s': fila PWM inicializada", self.name)
+        self._queue_pmove = self._mcu.lookup_command(
+            "queue_fpga_pmove oid=%c clock=%u"
+            " interval_x=%u count_x=%hu add_x=%hi"
+            " interval_y=%u count_y=%hu add_y=%hi"
+            " interval_z=%u count_z=%hu add_z=%hi"
+            " interval_a=%u count_a=%hu add_a=%hi"
+            " interval_b=%u count_b=%hu add_b=%hi",
+            cq=self.cmd_queue)
+        self._query_buffer = self._mcu.lookup_query_command(
+            "query_fpga_buffer oid=%c",
+            "fpga_buffer oid=%c free=%c")
+        # Mensagens assíncronas informando execuções concluídas
+        self._mcu.register_response(self._handle_exec, "fpga_exec", self.oid)
+        # Assume buffer vazio no início; o primeiro movimento ajustará o valor
+        self._buffer_free = self.buffer_size
+        curtime = self.reactor.monotonic()
+        curclock = self._mcu.print_time_to_clock(
+            self._mcu.estimated_print_time(curtime))
+        self._last_clock = curclock + self._mcu.print_time_to_clock(0.200)
+        logging.info("FPGA Loop '%s': comunicação iniciada", self.name)
 
     def _stepgen_fpga(self, flush_time):
-        """Gerador de passos substituto que envia atualizacoes de PWM."""
+        """Gerador de passos que apenas agenda atualizações no FPGA."""
         try:
-            self.set_pwm(flush_time, 0.)
+            self.set_move(0, 0, 0.)
         except self.printer.command_error as e:
             logging.error("FPGA stepgen erro: %s", str(e))
         return
 
-    def set_pwm(self, print_time, duty):
-        if self._queue_pwm is None:
+    def _handle_exec(self, params):
+        """Recebe sinal de conclusão de movimento do FPGA."""
+        executed = params.get('executed', 1)
+        self._buffer_free = min(self.buffer_size,
+                               self._buffer_free + executed)
+
+    def set_move(self, interval, count, at_time=None, add=0):
+        """Enfileira movimento para o FPGA."""
+        if self._queue_move is None:
             raise self.printer.command_error("FPGA loop não inicializado")
-        clock = self._mcu.print_time_to_clock(print_time)
-        clock = max(self._last_clock, clock)
-        duty = max(0.0, min(1.0, duty))
-        ivalue = int(duty * self._pwm_max + 0.5)
-        self._queue_pwm.send([self.oid, clock, ivalue],
-                             minclock=self._last_clock, reqclock=clock)
+        if at_time is None:
+            at_time = self._mcu.clock_to_print_time(self._last_clock)
+            at_time += self.update_interval
+        clock = self._mcu.print_time_to_clock(at_time)
+        min_clock = self._last_clock
+        if clock < min_clock + self._mcu.print_time_to_clock(0.010):
+            clock = min_clock + self._mcu.print_time_to_clock(0.010)
+        # Aguarda espaço no buffer do FPGA
+        while self._buffer_free == 0:
+            resp = self._query_buffer.send([self.oid])
+            self._buffer_free = resp.get('free', 0)
+            if self._buffer_free == 0:
+                self.reactor.pause(0.001)
+        self._queue_move.send([self.oid, clock, interval, count, add],
+                              minclock=min_clock, reqclock=clock)
+        self._buffer_free -= 1
         self._last_clock = clock
-        logging.debug("FPGA Loop '%s': duty=%.3f enviado em clock=%d",
-                      self.name, duty, clock)
+
+    def set_parallel_move(self, intervals, counts, adds, at_time=None):
+        """Enfileira movimento paralelo de todos os eixos."""
+        if self._queue_pmove is None:
+            raise self.printer.command_error("FPGA loop não inicializado")
+        if at_time is None:
+            at_time = self._mcu.clock_to_print_time(self._last_clock)
+            at_time += self.update_interval
+        clock = self._mcu.print_time_to_clock(at_time)
+        min_clock = self._last_clock
+        if clock < min_clock + self._mcu.print_time_to_clock(0.010):
+            clock = min_clock + self._mcu.print_time_to_clock(0.010)
+        while self._buffer_free == 0:
+            resp = self._query_buffer.send([self.oid])
+            self._buffer_free = resp.get('free', 0)
+            if self._buffer_free == 0:
+                self.reactor.pause(0.001)
+        params = [self.oid, clock]
+        for i in range(5):
+            params += [intervals[i], counts[i], adds[i]]
+        self._queue_pmove.send(params, minclock=min_clock, reqclock=clock)
+        self._buffer_free -= 1
+        self._last_clock = clock
 
 
 def load_config_prefix(config):
+    """Inicializa módulo a partir do arquivo de configuração."""
     return FPGALoopController(config)

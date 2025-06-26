@@ -1,0 +1,101 @@
+allocate_oids count=18
+config_spi oid=0 pin=PA6 cs_active_high=0
+config_analog_in oid=12 pin=PA0
+config_digital_out oid=13 pin=PB3 value=0 default_value=0 max_duration=48000000
+set_digital_out_pwm_cycle oid=13 cycle_ticks=1600000
+config_digital_out oid=14 pin=PD6 value=0 default_value=0 max_duration=0
+set_digital_out_pwm_cycle oid=14 cycle_ticks=160000
+spi_set_sw_bus oid=0 miso_pin=PC1 mosi_pin=PC0 sclk_pin=PC2 mode=0 pulse_ticks=16
+config_fpga oid=1 spi_oid=0 trigger_pin=PC5 axis_x_oid=0 microsteps_x=0 axis_y_oid=0 microsteps_y=0 axis_z_oid=0 microsteps_z=0 axis_a_oid=0 microsteps_a=0 axis_b_oid=0 microsteps_b=0 pid_P_x=6554 pid_I_x=655 pid_D_x=66 pid_P_y=6554 pid_I_y=655 pid_D_y=66 pid_P_z=6554 pid_I_z=655 pid_D_z=66 pid_P_a=0 pid_I_a=0 pid_D_a=0 pid_P_b=0 pid_I_b=0 pid_D_b=0
+config_endstop oid=2 pin=PB0 pull_up=1
+config_trsync oid=3
+config_stepper oid=4 step_pin=PA5 dir_pin=PA4 invert_step=0 step_pulse_ticks=32
+config_digital_out oid=15 pin=PA1 value=0 default_value=0 max_duration=0
+config_endstop oid=5 pin=PB1 pull_up=1
+config_trsync oid=6
+config_stepper oid=7 step_pin=PA3 dir_pin=PA2 invert_step=0 step_pulse_ticks=32
+config_endstop oid=8 pin=PB2 pull_up=1
+config_trsync oid=9
+config_stepper oid=10 step_pin=PC7 dir_pin=PC6 invert_step=0 step_pulse_ticks=32
+config_analog_in oid=16 pin=PA7
+config_digital_out oid=17 pin=PB4 value=0 default_value=0 max_duration=48000000
+set_digital_out_pwm_cycle oid=17 cycle_ticks=1600000
+config_stepper oid=11 step_pin=PC3 dir_pin=PC4 invert_step=0 step_pulse_ticks=32
+finalize_config crc=2992140241
+query_analog_in oid=12 clock=17920000 sample_ticks=16000 sample_count=8 rest_ticks=4800000 min_value=4100 max_value=8070 range_check_count=4
+queue_digital_out oid=13 clock=3200000 on_ticks=0
+queue_digital_out oid=14 clock=3200000 on_ticks=0
+query_analog_in oid=16 clock=18560000 sample_ticks=16000 sample_count=8 rest_ticks=4800000 min_value=723 max_value=8070 range_check_count=4
+queue_digital_out oid=17 clock=3200000 on_ticks=0
+stepper_set_fpga oid=4 enable=1
+stepper_set_fpga oid=7 enable=1
+stepper_set_fpga oid=10 enable=1
+queue_fpga_move oid=1 clock=3360000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=3520000 interval=0 count=0 add=0
+trsync_start oid=3 report_clock=4016000 report_ticks=1200000 expire_reason=4
+stepper_stop_on_trigger oid=4 trsync_oid=3
+trsync_set_timeout oid=3 clock=8016000
+endstop_home oid=2 clock=4016000 sample_ticks=240 sample_count=4 rest_ticks=40000 pin_value=1 trsync_oid=3 trigger_reason=1
+queue_fpga_move oid=1 clock=3680000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=3840000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4000000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4160000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4320000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4480000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4640000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4800000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=4960000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=5120000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=5280000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=5440000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=5600000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=5760000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=5920000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=6080000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=6240000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=6400000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=6560000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=6720000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=6880000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=7040000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=7200000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=7360000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=7520000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=7680000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=7840000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8000000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8160000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8320000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8480000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8640000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8800000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=8960000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=9120000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=9280000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=9440000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=9600000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=9760000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=9920000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=10080000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=10240000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=10400000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=10560000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=10720000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=10880000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=11040000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=11200000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=11360000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=11520000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=11680000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=11840000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=12000000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=12160000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=12320000 interval=0 count=0 add=0
+query_fpga_buffer oid=1
+queue_fpga_move oid=1 clock=12480000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=12640000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=12800000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=12960000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=13120000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=13280000 interval=0 count=0 add=0
+queue_fpga_move oid=1 clock=13440000 interval=0 count=0 add=0
