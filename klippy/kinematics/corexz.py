@@ -9,7 +9,8 @@ import stepper
 class CoreXZKinematics:
     def __init__(self, toolhead, config):
         # Setup axis rails
-        self.rails = [stepper.LookupMultiRail(config.getsection('stepper_' + n))
+        self.rails = [stepper.LookupMultiRail(
+            stepper.GetStepperSection(config, 'stepper_' + n))
                       for n in 'xyz']
         for s in self.rails[0].get_steppers():
             self.rails[2].get_endstops()[0][0].add_stepper(s)

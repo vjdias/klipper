@@ -12,7 +12,8 @@ SLOW_RATIO = 3.
 class DeltaKinematics:
     def __init__(self, toolhead, config):
         # Setup tower rails
-        stepper_configs = [config.getsection('stepper_' + a) for a in 'abc']
+        stepper_configs = [stepper.GetStepperSection(config, 'stepper_' + a)
+                          for a in 'abc']
         rail_a = stepper.LookupMultiRail(
             stepper_configs[0], need_position_minmax = False)
         a_endstop = rail_a.get_homing_info().position_endstop

@@ -15,8 +15,8 @@ MIN_ANGLE = 5.
 class DeltesianKinematics:
     def __init__(self, toolhead, config):
         self.rails = [None] * 3
-        stepper_configs = [config.getsection('stepper_' + s)
-                                    for s in ['left', 'right', 'y']]
+        stepper_configs = [stepper.GetStepperSection(config, 'stepper_' + s)
+                           for s in ['left', 'right', 'y']]
         self.rails[0] = stepper.LookupRail(
             stepper_configs[0], need_position_minmax = False)
         def_pos_es = self.rails[0].get_homing_info().position_endstop

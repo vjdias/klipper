@@ -189,8 +189,10 @@ class GenericCartesianKinematics:
                     raise report_error("Multi-mcu homing not supported on"
                                        " multi-mcu shared carriage %s" % es[1])
     def _load_steppers(self, config, carriages):
+        stepper_sections = config.get_prefix_sections('stepper ')
+        stepper_sections += config.get_prefix_sections('fpga_stepper ')
         return [ks.KinematicStepper(c, carriages)
-                for c in config.get_prefix_sections('stepper ')]
+                for c in stepper_sections]
     def get_steppers(self):
         return [s.get_stepper() for s in self.kin_steppers]
     def get_primary_carriages(self):

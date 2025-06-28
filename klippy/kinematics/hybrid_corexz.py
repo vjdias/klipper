@@ -12,9 +12,12 @@ class HybridCoreXZKinematics:
     def __init__(self, toolhead, config):
         self.printer = config.get_printer()
         # itersolve parameters
-        self.rails = [ stepper.LookupRail(config.getsection('stepper_x')),
-                       stepper.LookupMultiRail(config.getsection('stepper_y')),
-                       stepper.LookupMultiRail(config.getsection('stepper_z'))]
+        self.rails = [ stepper.LookupRail(
+                          stepper.GetStepperSection(config, 'stepper_x')),
+                       stepper.LookupMultiRail(
+                          stepper.GetStepperSection(config, 'stepper_y')),
+                       stepper.LookupMultiRail(
+                          stepper.GetStepperSection(config, 'stepper_z'))]
         self.rails[2].get_endstops()[0][0].add_stepper(
             self.rails[0].get_steppers()[0])
         self.rails[0].setup_itersolve('corexz_stepper_alloc', b'-')
