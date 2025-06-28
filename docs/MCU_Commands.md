@@ -252,6 +252,12 @@ only of interest to developers looking to gain insight into Klipper.
   number of steps generated with dir=1 minus the total number of steps
   generated with dir=0.
 
+* `fpga_stepper_get_position oid=%c` : Similar to
+  `stepper_get_position`, but requests that the MCU ask the FPGA for
+  the current step counts of all axes.  A `fpga_stepper_position`
+  response is generated containing `pos_x`, `pos_y`, `pos_z`, `pos_a`
+  e `pos_b`.
+
 * `endstop_home oid=%c clock=%u sample_ticks=%u sample_count=%c
   rest_ticks=%u pin_value=%c` : This command is used during stepper
   "homing" operations. To use this command a 'config_endstop' command

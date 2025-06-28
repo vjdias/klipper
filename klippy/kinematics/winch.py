@@ -12,9 +12,11 @@ class WinchKinematics:
         self.anchors = []
         for i in range(26):
             name = 'stepper_' + chr(ord('a') + i)
-            if i >= 3 and not config.has_section(name):
+            if i >= 3 and not (config.has_section(name)
+                               or config.has_section(
+                                   'fpga_stepper ' + chr(ord('a') + i))):
                 break
-            stepper_config = config.getsection(name)
+            stepper_config = stepper.GetStepperSection(config, name)
             s = stepper.PrinterStepper(stepper_config)
             self.steppers.append(s)
             a = tuple([stepper_config.getfloat('anchor_' + n) for n in 'xyz'])

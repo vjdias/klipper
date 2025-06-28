@@ -470,3 +470,18 @@ def LookupMultiRail(config, need_position_minmax=True,
         rail.add_stepper_from_config(
                 config.getsection(config.get_name() + str(i)))
     return rail
+
+# Helper to fetch a stepper section that may be defined using the
+# alternative 'fpga_stepper <axis>' syntax.  The given *name* should
+# normally be of the form 'stepper_x'.
+def GetStepperSection(config, name):
+    if config.has_section(name):
+        return config.getsection(name)
+    alt = None
+    if name.startswith('stepper_'):
+        axis = name.split('_', 1)[1]
+        alt = 'fpga_stepper ' + axis
+        if config.has_section(alt):
+            return config.getsection(alt)
+    raise config.error(
+        "Missing stepper section '%s'" % (alt or name))

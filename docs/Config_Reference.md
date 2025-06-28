@@ -5545,3 +5545,40 @@ All other Klipper micro-controllers use a
 #   to 100000 and changing this value has no effect. The default is
 #   100000. Linux, RP2040 and ATmega support 400000.
 ```
+
+### [fpga_loop]
+Ativa o controle via FPGA e configura sua comunicação. O módulo é
+carregado automaticamente a partir de `klippy/extras/fpga_loop.py`.
+
+```
+[fpga_loop]
+spi_cs_pin: PA6
+spi_speed: 1000000
+spi_software_mosi_pin: PC0
+spi_software_miso_pin: PC1
+spi_software_sclk_pin: PC2
+trigger_pin: PC5
+update_interval: 0.005
+```
+`spi_speed` define a velocidade em Hz usada na comunicacao SPI (padrao
+1000000 caso nao seja especificado).
+
+### [fpga_stepper]
+Define um stepper controlado pelo FPGA. A seção deve ser nomeada
+`[fpga_stepper <eixo>]` e possui os mesmos parâmetros de um `[stepper]`
+tradicional (`step_pin`, `dir_pin`, `enable_pin`, `microsteps`,
+`rotation_distance`, etc). Também é possível fornecer ganhos PID
+opcionais para cada eixo.
+
+```
+[fpga_stepper x]
+step_pin: PA5
+dir_pin: PA4
+enable_pin: PA1
+microsteps: 16
+rotation_distance: 40
+endstop_pin: ^PB0
+pid_P: 0.100
+pid_I: 0.010
+pid_D: 0.001
+```

@@ -1,5 +1,3 @@
-+156
--58
 
 # Controle de movimento em malha fechada via FPGA conectado ao MCU.
 # Este módulo permite configurar parâmetros estáticos do controlador FPGA
@@ -29,8 +27,12 @@ class FPGALoopController:
         self.sw_sclk_pin = config.get('spi_software_sclk_pin', None)
 
         # Cria objeto SPI utilizando helper padronizado do Klipper
+        # Velocidade de comunicação pode ser ajustada via 'spi_speed'
+        # (padrão 1MHz se não especificado)
+        spi_speed = config.getint('spi_speed', 1000000, minval=100000)
+        self.spi_speed = spi_speed
         self.spi = bus.MCU_SPI_from_config(
-            config, 0, pin_option='spi_cs_pin', default_speed=1000000)
+            config, 0, pin_option='spi_cs_pin', default_speed=spi_speed)
 
         # Pino usado como "trigger" indicando que o FPGA terminou um movimento
         ppins = self.printer.lookup_object('pins')
@@ -39,30 +41,22 @@ class FPGALoopController:
             raise config.error('trigger_pin deve estar no mesmo MCU do SPI')
         self.trigger_pin = tpin_params['pin']
 
-        # Definição dos eixos associados a steppers
+        # Informações dos eixos controlados pelo FPGA
         self._axis_defs = {}
-        for axis in ['x', 'y', 'z', 'a', 'b']:
-            sec_name = config.get(f'axis_{axis}', None)
-            if sec_name is None:
-                continue
-            scfg = config.getsection(sec_name)
+        self.pid_gains = {}
+        # Seções do tipo [fpga_stepper <axis>]
+        for scfg in config.get_prefix_sections('fpga_stepper '):
+            axis = scfg.get_name().split()[1].lower()
             micro = scfg.getint('microsteps', note_valid=False)
-            self._axis_defs[axis] = (sec_name, micro)
+            self._axis_defs[axis] = (scfg.get_name(), micro)
+            p = scfg.getfloat('pid_P', 0.0)
+            i = scfg.getfloat('pid_I', 0.0)
+            d = scfg.getfloat('pid_D', 0.0)
+            self.pid_gains[axis] = (p, i, d)
+
         if not self._axis_defs:
             raise self.printer.config_error(
-                "[fpga_loop] requer pelo menos um eixo configurado")
-
-        # Ganhos PID individuais para cada eixo
-        self.pid_gains = {}
-        for axis in ['x', 'y', 'z', 'a', 'b']:
-            p = config.getfloat(f'pid_P_{axis}', None)
-            i = config.getfloat(f'pid_I_{axis}', None)
-            d = config.getfloat(f'pid_D_{axis}', None)
-            if p is not None and i is not None and d is not None:
-                self.pid_gains[axis] = (p, i, d)
-        # Caso algum eixo não possua ganho definido, assume zero
-        for axis in self._axis_defs:
-            self.pid_gains.setdefault(axis, (0.0, 0.0, 0.0))
+                "É necessário definir pelo menos um [fpga_stepper]")
 
         self.update_interval = config.getfloat('update_interval', 0.005,
                                                above=0.)
@@ -80,6 +74,7 @@ class FPGALoopController:
         self._queue_move = None
         self._queue_pmove = None
         self._query_buffer = None
+        self._query_pos_cmd = None
         self._set_fpga_cmd = None
         self._buffer_free = 0
         self.buffer_size = 0
@@ -87,8 +82,12 @@ class FPGALoopController:
         self._last_clock = 0
 
         # Processa conexão quando MCU estiver pronta
-        self.printer.register_event_handler('klippy:connect',
-                                            self._handle_connect)
+        # Quando o MCU concluir a fase de conexão, configurará os
+        # steppers associados e iniciará a comunicação com o FPGA.
+        self.printer.register_event_handler(
+            'klippy:connect', self._handle_connect)
+        self.printer.register_event_handler(
+            'klippy:disconnect', self._handle_disconnect)
 
     def _handle_connect(self):
         """Configura steppers e inicializa comunicação."""
@@ -106,6 +105,18 @@ class FPGALoopController:
         toolhead.register_step_generator(self._stepgen_fpga)
         self._mcu.register_config_callback(self._build_config)
         self._init_comm()
+
+    def _handle_disconnect(self):
+        """Restaura geradores de passo ao desconectar."""
+        toolhead = self.printer.lookup_object('toolhead')
+        for stepper, _ in self._axes.values():
+            toolhead.register_step_generator(stepper.generate_steps)
+            if self._set_fpga_cmd is not None:
+                self._set_fpga_cmd.send([stepper.get_oid(), 0])
+        try:
+            toolhead.unregister_step_generator(self._stepgen_fpga)
+        except ValueError:
+            pass
 
     def _build_config(self):
         """Envia configuração estática ao MCU/FPGA."""
@@ -152,6 +163,10 @@ class FPGALoopController:
         self._query_buffer = self._mcu.lookup_query_command(
             "query_fpga_buffer oid=%c",
             "fpga_buffer oid=%c free=%c")
+        self._query_pos_cmd = self._mcu.lookup_query_command(
+            "fpga_stepper_get_position oid=%c",
+            ("fpga_stepper_position oid=%c pos_x=%i pos_y=%i "
+             "pos_z=%i pos_a=%i pos_b=%i"))
         # Mensagens assíncronas informando execuções concluídas
         self._mcu.register_response(self._handle_exec, "fpga_exec", self.oid)
         # Assume buffer vazio no início; o primeiro movimento ajustará o valor
@@ -163,9 +178,17 @@ class FPGALoopController:
         logging.info("FPGA Loop '%s': comunicação iniciada", self.name)
 
     def _stepgen_fpga(self, flush_time):
-        """Gerador de passos que apenas agenda atualizações no FPGA."""
+        """Gera comandos para todos os eixos controlados pelo FPGA."""
         try:
-            self.set_move(0, 0, 0.)
+            # Se existir mais de um eixo associado, envie movimento paralelo
+            if len(self._axes) > 1:
+                intervals = [0] * 5
+                counts = [0] * 5
+                adds = [0] * 5
+                self.set_parallel_move(intervals, counts, adds)
+            else:
+                # Mantém comportamento anterior para único eixo
+                self.set_move(0, 0, 0.)
         except self.printer.command_error as e:
             logging.error("FPGA stepgen erro: %s", str(e))
         return
@@ -221,7 +244,15 @@ class FPGALoopController:
         self._buffer_free -= 1
         self._last_clock = clock
 
+    def query_positions(self):
+        """Retorna posições atuais fornecidas pelo FPGA."""
+        if self._query_pos_cmd is None:
+            raise self.printer.command_error("FPGA loop não inicializado")
+        resp = self._query_pos_cmd.send([self.oid])
+        return {a: resp.get('pos_' + a, 0) for a in 'xyzab'}
+
+
 
 def load_config_prefix(config):
-    """Inicializa módulo a partir do arquivo de configuração."""
+    """Inicializa modulo a partir do arquivo de configuracao."""
     return FPGALoopController(config)

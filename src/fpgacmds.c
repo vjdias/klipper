@@ -227,6 +227,24 @@ command_query_fpga_buffer(uint32_t *args)
 }
 DECL_COMMAND(command_query_fpga_buffer, "query_fpga_buffer oid=%c");
 
+// Solicita ao FPGA as posições atuais de todos os eixos
+void
+command_fpga_stepper_get_position(uint32_t *args)
+{
+    struct fpga_controller *fc = oid_lookup(args[0], command_config_fpga);
+    uint8_t msg[1 + 5*4];
+    msg[0] = 3; // comando para leitura de posições
+    spidev_transfer(fc->spi, 1, sizeof(msg), msg);
+    int32_t pos[5];
+    for (int i = 0; i < 5; i++)
+        memcpy(&pos[i], &msg[1 + i*4], 4);
+    sendf("fpga_stepper_position oid=%c pos_x=%i pos_y=%i pos_z=%i "
+          "pos_a=%i pos_b=%i",
+          fc->oid, pos[0], pos[1], pos[2], pos[3], pos[4]);
+}
+DECL_COMMAND(command_fpga_stepper_get_position,
+             "fpga_stepper_get_position oid=%c");
+
 // Limpa filas durante o desligamento
 void
 fpga_shutdown(void)

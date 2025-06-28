@@ -9,10 +9,13 @@ import stepper
 class PolarKinematics:
     def __init__(self, toolhead, config):
         # Setup axis steppers
-        stepper_bed = stepper.PrinterStepper(config.getsection('stepper_bed'),
+        stepper_bed = stepper.PrinterStepper(
+            stepper.GetStepperSection(config, 'stepper_bed'),
                                              units_in_radians=True)
-        rail_arm = stepper.LookupRail(config.getsection('stepper_arm'))
-        rail_z = stepper.LookupMultiRail(config.getsection('stepper_z'))
+        rail_arm = stepper.LookupRail(
+            stepper.GetStepperSection(config, 'stepper_arm'))
+        rail_z = stepper.LookupMultiRail(
+            stepper.GetStepperSection(config, 'stepper_z'))
         stepper_bed.setup_itersolve('polar_stepper_alloc', b'a')
         rail_arm.setup_itersolve('polar_stepper_alloc', b'r')
         rail_z.setup_itersolve('cartesian_stepper_alloc', b'z')
