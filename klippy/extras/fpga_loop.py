@@ -111,7 +111,8 @@ class FPGALoopController:
         toolhead = self.printer.lookup_object('toolhead')
         for stepper, _ in self._axes.values():
             toolhead.register_step_generator(stepper.generate_steps)
-            if self._set_fpga_cmd is not None:
+            if (self._set_fpga_cmd is not None
+                    and self._mcu._serial.get_serialqueue() is not None):
                 self._set_fpga_cmd.send([stepper.get_oid(), 0])
         try:
             toolhead.unregister_step_generator(self._stepgen_fpga)
